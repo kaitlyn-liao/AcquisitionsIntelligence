@@ -1,12 +1,13 @@
-from pacai.core.directions import Directions
+import random
+import logging
+import time
 
-# from pacai.agents.capture.capture import CaptureAgent
+from pacai.util import util
+from pacai.core.directions import Directions
 from pacai.agents.capture.reflex import ReflexCaptureAgent
 
 
-def createTeam(firstIndex, secondIndex, isRed,
-        first = 'pacai.student.myTeam.OffensiveReflexAgent',
-        second = 'pacai.student.myTeam.OffensiveReflexAgent'):
+def createTeam(firstIndex, secondIndex, isRed, first = '', second=''):
     """
     This function should return a list of two agents that will form the capture team,
     initialized using firstIndex and secondIndex as their agent indexed.
@@ -14,15 +15,15 @@ def createTeam(firstIndex, secondIndex, isRed,
     and will be False if the blue team is being created.
     """
 
-    firstAgent = OffensiveReflexAgent(firstIndex)
-    secondAgent = DefensiveReflexAgent(secondIndex)
+    firstAgent = Kicker(firstIndex)
+    secondAgent = Goalie(secondIndex)
 
     return [
         firstAgent,
         secondAgent,
     ]
 
-class DefensiveReflexAgent(ReflexCaptureAgent):
+class Goalie(ReflexCaptureAgent):
     """
     A reflex agent that tries to keep its side Pacman-free.
     This is to give you an idea of what a defensive agent could be like.
@@ -49,9 +50,22 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
         invaders = [a for a in enemies if a.isPacman() and a.getPosition() is not None]
         features['numInvaders'] = len(invaders)
 
+        # go after any pacman we see
         if (len(invaders) > 0):
             dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders]
+            # print(invaders[0].getPosition())
             features['invaderDistance'] = min(dists)
+            if min(dists) > 4:
+                features['invaderDistance'] = min(dists) + 100
+        else:
+            players = [0, 1, 2, 3]
+            kickPos = [p for p in players if self.index != p
+                    and p not in self.getOpponents(successor)]
+            kState = successor.getAgentState(kickPos[0])
+            kickPos = kState.getPosition()
+
+            dist = self.getMazeDistance(myPos, kickPos)
+            features['partnerDistance'] = dist
 
         if (action == Directions.STOP):
             features['stop'] = 1
@@ -66,12 +80,44 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
         return {
             'numInvaders': -1000,
             'onDefense': 100,
-            'invaderDistance': -10,
+            'invaderDistance': -10000,
             'stop': -100,
-            'reverse': -2
+            'reverse': -2,
+            'partnerDistance': -1
         }
 
-class OffensiveReflexAgent(ReflexCaptureAgent):
+    def chooseAction(self, gameState):
+        """
+        Picks among the actions with the highest return from `ReflexCaptureAgent.evaluate`.
+        """
+
+        actions = gameState.getLegalActions(self.index)
+
+        start = time.time()
+        values = [self.evaluate(gameState, a) for a in actions]
+        logging.debug('evaluate() time for agent %d: %.4f' % (self.index, time.time() - start))
+
+        maxValue = max(values)
+        bestActions = [a for a, v in zip(actions, values) if v == maxValue]
+
+        return random.choice(bestActions)
+
+    def getSuccessor(self, gameState, action):
+        """
+        Finds the next successor which is a grid position (location tuple).
+        """
+
+        successor = gameState.generateSuccessor(self.index, action)
+        pos = successor.getAgentState(self.index).getPosition()
+
+        if (pos != util.nearestPoint(pos)):
+            # Only half a grid position was covered.
+            return successor.generateSuccessor(self.index, action)
+        else:
+            return successor
+
+
+class Kicker(ReflexCaptureAgent):
     """
     A reflex agent that seeks food.
     This agent will give you an idea of what an offensive agent might look like,
@@ -102,3 +148,128 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
             'successorScore': 100,
             'distanceToFood': -1
         }
+
+    def chooseAction(self, gameState):
+        """
+        Picks among the actions with the highest return from `ReflexCaptureAgent.evaluate`.
+        """
+
+        # actions = gameState.getLegalActions(self.index)
+
+        start = time.time()
+        # lets do minimax here, instead of just picking the higest value
+
+        actions = gameState.getLegalActions(self.index)
+        ways = []
+        for action in actions:
+            bestAction = self.value(gameState, action, self.index + 1,
+                                    self.index, -999999999, 999999999)
+            # print("best action ", bestAction)
+            ways.append(bestAction)
+
+        bestWays = []
+        bestVal = -9999999999999999
+        for move in ways:
+            if bestVal < move[0]:
+                bestVal = move[0]
+                bestWays.append(move)
+
+        # print("bestWays:", bestWays)
+        logging.debug('evaluate() time for agent %d: %.4f' % (self.index, time.time() - start))
+
+        return random.choice(bestWays)[1]
+
+    def getSuccessor(self, gameState, action):
+        """
+        Finds the next successor which is a grid position (location tuple).
+        """
+
+        successor = gameState.generateSuccessor(self.index, action)
+        pos = successor.getAgentState(self.index).getPosition()
+
+        if (pos != util.nearestPoint(pos)):
+            # Only half a grid position was covered.
+            return successor.generateSuccessor(self.index, action)
+        else:
+            return successor
+
+    # prune via alpha and beta values to return quicker
+    def minValue(self, state, move, depp, aid, alpha, beta):
+        legalMoves = state.getLegalActions(aid)
+        if 'Stop' in legalMoves:
+            legalMoves.remove("Stop")
+        # print(legalMoves)
+
+        minUtil = 999999969
+        minAction = ""
+        for move in legalMoves:
+            # print(move)
+            succState = state.generateSuccessor(aid, move)
+            succUtil, succAction = self.value(succState, move, depp, aid + 1, alpha, beta)
+
+            if minAction == "" or succUtil <= minUtil:
+                minAction = move
+                minUtil = succUtil
+
+            if minUtil <= alpha:
+                # print(minUtil, alpha)
+                return (minUtil, minAction)
+
+            beta = min(beta, minUtil)
+
+            # print("MIN", aid, "Move:", move, "successor:", (succAction, succUtil))
+
+        return (minUtil, minAction)
+
+    def maxValue(self, state, move, depp, aid, alpha, beta):
+        legalMoves = state.getLegalActions(aid)
+        if 'Stop' in legalMoves:
+            legalMoves.remove("Stop")
+        # print(legalMoves)
+
+        maxUtil = -999999999
+        maxAction = ""
+        for move in legalMoves:
+            # print(move)
+            succState = state.generateSuccessor(aid, move)
+            succUtil, succAction = self.value(succState, move, depp, aid + 1, alpha, beta)
+
+            if maxAction == "" or succUtil > maxUtil:
+                maxAction = move
+                maxUtil = succUtil
+
+            if maxUtil >= beta:
+                # print(maxUtil, beta)
+                return (maxUtil, maxAction)
+
+            alpha = max(alpha, maxUtil)
+
+            # print("MAX", aid, "Move:", move, "successor:", (succAction, succUtil))
+
+        return (maxUtil, maxAction)
+
+    def value(self, state, move, depp, aid, alpha, beta):
+        if aid == state.getNumAgents():
+            aid = self.index
+            depp += 1
+
+        if state.isWin() or state.isLose():
+            return 0, "term"
+
+        if depp > self.getTreeDepth():
+            legalMoves = state.getLegalActions(aid)
+            # if 'Stop' in legalMoves: legalMoves.remove("Stop")
+            # print(aid, legalMoves)
+            ways = [self.evaluate(state, m) for m in legalMoves]
+            return max(ways), "term"
+
+        # print("agent", aid)
+        if aid in self.getTeam(state):
+            # print("PACAI!")
+            return self.maxValue(state, move, depp, aid, alpha, beta)
+        if aid in self.getOpponents(state):
+            # print("GHOST!")
+            return self.minValue(state, move, depp, aid, alpha, beta)
+
+    def getTreeDepth(self):
+        return 1 + self.index
