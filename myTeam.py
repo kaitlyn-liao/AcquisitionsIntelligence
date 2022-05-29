@@ -15,15 +15,15 @@ def createTeam(firstIndex, secondIndex, isRed, first = '', second=''):
     and will be False if the blue team is being created.
     """
 
-    firstAgent = Kicker(firstIndex)
-    secondAgent = Goalie(secondIndex)
+    havok = Havok(firstIndex)
+    witch = Itzcal_Lenora(secondIndex)
 
     return [
-        firstAgent,
-        secondAgent,
+        havok,
+        witch,
     ]
 
-class Goalie(ReflexCaptureAgent):
+class Itzcal_Lenora(ReflexCaptureAgent):
     """
     A reflex agent that tries to keep its side Pacman-free.
     This is to give you an idea of what a defensive agent could be like.
@@ -101,7 +101,7 @@ class Goalie(ReflexCaptureAgent):
             'numInvaders': -1000,
             'onDefense': 100,
             'invaderDistance': -10000,
-            'stop': -100,
+            'stop': -10,
             'reverse': -2,
             'endangeredPelletDistance': -10
         }
@@ -136,8 +136,7 @@ class Goalie(ReflexCaptureAgent):
         else:
             return successor
 
-
-class Kicker(ReflexCaptureAgent):
+class Havok(ReflexCaptureAgent):
     """
     A reflex agent that seeks food.
     This agent will give you an idea of what an offensive agent might look like,
@@ -149,33 +148,72 @@ class Kicker(ReflexCaptureAgent):
 
     def getFeatures(self, gameState, action):
         features = {}
+
+        if action == "Stop":
+            features['stop'] = 1
+
+        # Computes information about our agent
         successor = self.getSuccessor(gameState, action)
+        myState = successor.getAgentState(self.index)
+        myPos = myState.getPosition()
+        amPac = myState.isPacman()
         features['successorScore'] = self.getScore(successor)
+
+        # Computes distance to invaders we can see.
+        enemies = [successor.getAgentState(i) for i in self.getOpponents(successor)]
+        invaders = [a for a in enemies if a.isPacman() and a.getPosition() is not None]
+        defenders = []
+        for e in enemies:
+            if e not in invaders:
+                defenders.append(e)
 
         # Compute distance to the nearest food.
         foodList = self.getFood(successor).asList()
 
         # This should always be True, but better safe than sorry.
         if (len(foodList) > 0):
-            myPos = successor.getAgentState(self.index).getPosition()
             minDistance = min([self.getMazeDistance(myPos, food) for food in foodList])
             features['distanceToFood'] = minDistance
+
+        # distance from the ghosts, avoid them!
+        # if agent is a pacman, dodge some ghosts
+        if amPac:
+            # if there are ghosts defending
+            if len(defenders) > 0:
+                dists = [self.getMazeDistance(myPos, a.getPosition()) for a in defenders]
+                features['distanceToGhost'] = min(dists)
+            # there are no defending ghosts
+            else:
+                features['distanceToGhost'] = -1
+
+        # if a ghost is eatable
+        for enemy in enemies:
+            if enemy.isScared():
+                dist = self.getMazeDistance(myPos, enemy.getPosition())
+                features['distFromEatableGhost'] = dist
+
+        # grab the capsule to eat ghosts
+        caps = self.getCapsules(successor)
+        if len(caps) > 0:
+            minDistance = min([self.getMazeDistance(myPos, cap) for cap in caps])
+            features['eatCap'] = minDistance
 
         return features
 
     def getWeights(self, gameState, action):
         return {
-            'successorScore': 100,
-            'distanceToFood': -1
+            'successorScore': 1000,
+            'distanceToFood': -100,
+            'distanceToGhost': 50,
+            'distFromEatableGhost': -10000,
+            'eatCap': -1,
+            'stop': -100000000
         }
 
     def chooseAction(self, gameState):
         """
         Picks among the actions with the highest return from `ReflexCaptureAgent.evaluate`.
         """
-
-        # actions = gameState.getLegalActions(self.index)
-
         start = time.time()
         # lets do minimax here, instead of just picking the higest value
 
