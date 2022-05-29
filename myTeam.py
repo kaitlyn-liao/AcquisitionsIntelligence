@@ -40,6 +40,14 @@ class Goalie(ReflexCaptureAgent):
         myState = successor.getAgentState(self.index)
         myPos = myState.getPosition()
 
+        # calculate distance from our teammate, if we need it
+        players = [0, 1, 2, 3]
+        partPos = [p for p in players if self.index != p
+                and p not in self.getOpponents(successor)]
+        pState = successor.getAgentState(partPos[0])
+        partPos = pState.getPosition()
+        partnerDistance = self.getMazeDistance(myPos, partPos)
+
         # Computes whether we're on defense (1) or offense (0).
         features['onDefense'] = 1
         if (myState.isPacman()):
@@ -54,18 +62,30 @@ class Goalie(ReflexCaptureAgent):
         if (len(invaders) > 0):
             dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders]
             # print(invaders[0].getPosition())
-            features['invaderDistance'] = min(dists)
+            minDist = min(dists)
             if min(dists) > 4:
-                features['invaderDistance'] = min(dists) + 100
+                minDist = minDist + 100
+            features['invaderDistance'] = min(dists) + 100
         else:
-            players = [0, 1, 2, 3]
-            kickPos = [p for p in players if self.index != p
-                    and p not in self.getOpponents(successor)]
-            kState = successor.getAgentState(kickPos[0])
-            kickPos = kState.getPosition()
+            # features['partnerDistance'] = partnerDistance
+            # dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders]
+            # minDist = min(dists)
+            endangeredPellets = {}
+            distancesFromGhosts = []
+            for pellet in self.getFoodYouAreDefending(successor).asList():
+                # print(pellet)
+                minDistFromEnemies = 0
+                for enemy in enemies:
+                    # print("enemy from pellet", self.getMazeDistance(pellet, enemy.getPosition()))
+                    if minDistFromEnemies < self.getMazeDistance(pellet, enemy.getPosition()):
+                        minDistFromEnemies = self.getMazeDistance(pellet, enemy.getPosition())
+                distancesFromGhosts.append(minDistFromEnemies)
+                endangeredPellets[minDistFromEnemies] = pellet
+                # print("opp", enemy.getPosition(), "is", minDistFromEnemies, "spots away from pellet", endangeredPellets[minDistFromEnemies])
 
-            dist = self.getMazeDistance(myPos, kickPos)
-            features['partnerDistance'] = dist
+            mostDangerPellet = endangeredPellets[min(distancesFromGhosts)]
+            # print("IN DANGER", mostDangerPellet, "is", min(distancesFromGhosts), "spaces away from a ghost")
+            features['endangeredPelletDistance'] = self.getMazeDistance(myPos, mostDangerPellet)
 
         if (action == Directions.STOP):
             features['stop'] = 1
@@ -83,7 +103,7 @@ class Goalie(ReflexCaptureAgent):
             'invaderDistance': -10000,
             'stop': -100,
             'reverse': -2,
-            'partnerDistance': -1
+            'endangeredPelletDistance': -10
         }
 
     def chooseAction(self, gameState):
